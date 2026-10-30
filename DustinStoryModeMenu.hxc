@@ -1,0 +1,554 @@
+import funkin.ui.MusicBeatState;
+import funkin.ui.mainmenu.MainMenuState;
+import funkin.util.TouchUtil;
+import funkin.audio.FunkinSound;
+import funkin.Paths;
+import funkin.play.PlayState;
+import funkin.play.PlayStatePlaylist;
+import funkin.data.song.SongRegistry;
+import funkin.data.story.level.LevelRegistry;
+import funkin.Highscore;
+import funkin.Tallies;
+import funkin.util.Constants;
+import funkin.ui.transition.LoadingState;
+import flixel.FlxG;
+import flixel.FlxSprite;
+import flixel.text.FlxText;
+import flixel.text.FlxText.FlxTextBorderStyle;
+import flixel.FlxCamera;
+import flixel.tweens.FlxTween;
+import flixel.tweens.FlxEase;
+import flixel.util.FlxColor;
+import flixel.math.FlxMath;
+import flixel.addons.transition.FlxTransitionableState;
+import flixel.util.FlxTimer;
+import flixel.addons.util.FlxSimplex;
+
+class DustinStorySelectState extends MusicBeatState
+{
+	static var lastDifficultyName:String = 'Normal';
+
+	var levelList:Array<String> = [
+		'dusttale',
+		'dustswap',
+		'dustfell',
+		'dustbelief',
+		'dustshift'
+	];
+
+	var dustGroup:Array<String> = ['dustswap', 'dustfell', 'dustbelief', 'dustshift'];
+
+	var levelPosX:Array<Float> = [125, 130, 395, 670, 925];
+	var levelPosY:Array<Float> = [55, 405, 400, 405, 400];
+
+	var currentLevelId:String = '';
+	var currentDifficultyId:String = 'normal';
+	var currentLevel:Dynamic = null;
+	var curLevel:Int = 0;
+	var selectedLevel:Bool = false;
+	var exitingMenu:Bool = false;
+	var isTransitioning:Bool = false;
+	var loadingSong:Bool = false;
+	var canSelect:Bool = true;
+	var canLerp:Bool = true;
+	var zoomLevel:Float = 1.0;
+
+	var bgDark:FlxSprite;
+	var pillars1:FlxSprite;
+	var pillars2:FlxSprite;
+	var text:FlxSprite;
+	var whiteFlash:FlxSprite;
+	var barTop:FlxSprite;
+	var barBottom:FlxSprite;
+	var levelSprites:Array<FlxSprite> = [];
+	var selectScreens:Array<FlxSprite> = [];
+
+	var backBtn:FlxSprite;
+	var backButtonPendingClose:Bool = false;
+	var backButtonPointerActive:Bool = false;
+	var backButtonPointerOnButton:Bool = false;
+	var camHUD:FlxCamera;
+
+	var colorLocked:Int = 0xFFB1B1B1;
+	var tShake:Float = 0;
+	var speedizer:Float = 0;
+	var xoffset:Float = 0;
+	var yoffset:Float = 0;
+	var angleoffset:Float = 0;
+
+	override function create():Void
+	{
+		FlxTransitionableState.skipNextTransIn = true;
+		FlxTransitionableState.skipNextTransOut = true;
+
+		persistentUpdate = true;
+		persistentDraw = true;
+
+		FlxG.camera.scroll.set(0, -60);
+		FlxG.camera.zoom = 1.2;
+		FlxG.camera.follow(null);
+
+		camHUD = new FlxCamera();
+		camHUD.bgColor = 0x00000000;
+		FlxG.cameras.add(camHUD, false);
+
+		super.create();
+
+		FlxG.mouse.visible = true;
+
+		if (lastDifficultyName == null || lastDifficultyName == '')
+			lastDifficultyName = 'Normal';
+
+		currentDifficultyId = lastDifficultyName.toLowerCase();
+
+		FunkinSound.playMusic('freakyMenu', {
+			overrideExisting: false,
+			restartTrack: false,
+			persist: true
+		});
+
+		bgDark = new FlxSprite().makeGraphic(FlxG.width, FlxG.height, 0xFF000000);
+		bgDark.alpha = 0.0;
+		bgDark.scrollFactor.set();
+		add(bgDark);
+
+		FlxTween.tween(bgDark, { alpha: 0.6 }, 0.35, { ease: FlxEase.quadOut });
+
+		pillars1 = new FlxSprite().loadGraphic(Paths.image('menus/freeplay/background 1'));
+		pillars1.scrollFactor.set(0.8, 0.8);
+		pillars1.antialiasing = true;
+		add(pillars1);
+
+		pillars2 = new FlxSprite().loadGraphic(Paths.image('menus/freeplay/background 2'));
+		pillars2.scrollFactor.set(0.8, 0.8);
+		pillars2.antialiasing = true;
+		add(pillars2);
+
+		var usefulFrames = Paths.getSparrowAtlas('menus/freeplay/characters');
+		for (i in 0...levelList.length)
+		{
+			var spr = new FlxSprite(levelPosX[i], levelPosY[i]);
+			spr.frames = usefulFrames;
+			spr.animation.addByPrefix('idle', levelList[i] + '0', 24, true);
+			spr.animation.addByPrefix('selected', levelList[i] + ' select', 24, true);
+			spr.animation.play('idle');
+			spr.antialiasing = true;
+			spr.origin.set(spr.width * 0.5, spr.height);
+			spr.ID = i;
+			spr.color = colorLocked;
+			add(spr);
+			levelSprites.push(spr);
+
+			var scr = new FlxSprite().loadGraphic(Paths.image('menus/freeplay/select screens/' + levelList[i]));
+			scr.visible = false;
+			scr.antialiasing = true;
+			scr.ID = i;
+			add(scr);
+			selectScreens.push(scr);
+		}
+
+		text = new FlxSprite().loadGraphic(Paths.image('menus/freeplay/text'));
+		text.scrollFactor.set();
+		text.antialiasing = true;
+		text.alpha = 0;
+		add(text);
+
+		FlxTween.tween(text, {alpha: 1}, 1.25, {ease: FlxEase.quartOut});
+
+		whiteFlash = new FlxSprite().makeGraphic(FlxG.width, FlxG.height, 0xFFFFFFFF);
+		whiteFlash.alpha = 0;
+		add(whiteFlash);
+
+		barTop = new FlxSprite(0, -360).makeGraphic(FlxG.width, 360, 0xFF000000);
+		barTop.cameras = [camHUD];
+		add(barTop);
+
+		barBottom = new FlxSprite(0, FlxG.height).makeGraphic(FlxG.width, 360, 0xFF000000);
+		barBottom.cameras = [camHUD];
+		add(barBottom);
+
+		createBackButton();
+
+		FlxTween.tween(FlxG.camera, {zoom: 1}, 1.25, {ease: FlxEase.quartOut});
+		FlxTween.tween(FlxG.camera.scroll, {y: 0}, 1.25, {ease: FlxEase.quartOut});
+
+		showMenuScreen();
+		changeLevel(0);
+	}
+
+	override function update(elapsed:Float):Void
+	{
+		super.update(elapsed);
+
+		if (canLerp && !selectedLevel)
+		{
+			var my:Float = FlxG.mouse != null ? FlxG.mouse.y : FlxG.height / 2;
+			zoomLevel = 1 + (Math.abs(Math.max(Math.min(425, my), 385) - 425) * 0.0005);
+
+			var targetCamY:Float = (my - FlxG.height / 2) * 0.04;
+			FlxG.camera.scroll.x = FlxMath.lerp(FlxG.camera.scroll.x, 0, FlxMath.bound(elapsed * 6, 0, 1));
+			FlxG.camera.scroll.y = FlxMath.lerp(FlxG.camera.scroll.y, targetCamY, FlxMath.bound(elapsed * 6, 0, 1));
+		}
+
+		FlxG.camera.zoom = FlxMath.lerp(FlxG.camera.zoom, zoomLevel, FlxMath.bound(elapsed * 6, 0, 1));
+
+		if (tShake > 0)
+			updateShake(elapsed);
+
+		for (i in 0...levelSprites.length)
+		{
+			var spr = levelSprites[i];
+			if (spr != null)
+			{
+				spr.origin.set(spr.frameWidth * 0.5, spr.frameHeight);
+
+				var baseScale:Float = (i == curLevel) ? 1.05 : 1.0;
+				var targetScale:Float = baseScale * (1.0 + (zoomLevel - 1.0) * (i == 0 ? 1.05 : 0.85));
+
+				var lerpRatio:Float = FlxMath.bound(elapsed * 12, 0, 1);
+				spr.scale.x = FlxMath.lerp(spr.scale.x, targetScale, lerpRatio);
+				spr.scale.y = FlxMath.lerp(spr.scale.y, targetScale, lerpRatio);
+
+				var targetColor:Int = (i == curLevel) ? FlxColor.WHITE : colorLocked;
+				spr.color = FlxColor.interpolate(spr.color, targetColor, FlxMath.bound(elapsed * 8, 0, 1));
+			}
+		}
+
+		if (backButtonPendingClose)
+		{
+			if (backBtn == null || backBtn.animation.curAnim == null || backBtn.animation.curAnim.finished)
+			{
+				backButtonPendingClose = false;
+				returnToMenu();
+				return;
+			}
+			return;
+		}
+
+		updateBackButtonInput();
+
+		if (backButtonPendingClose || isTransitioning)
+			return;
+
+		if (!canSelect || selectedLevel)
+			return;
+
+		handleInput();
+		updateShownInfo();
+	}
+
+	function createBackButton():Void
+	{
+		backBtn = new FlxSprite();
+		backBtn.frames = Paths.getSparrowAtlas('menus/freeplay/backButton');
+		backBtn.animation.addByPrefix('idle', 'back0000', 24, false);
+		backBtn.animation.addByPrefix('press', 'back', 24, false);
+		backBtn.animation.play('idle', true);
+		backBtn.scrollFactor.set();
+		backBtn.cameras = [camHUD];
+		backBtn.antialiasing = true;
+		backBtn.scale.set(0.58, 0.58);
+		backBtn.updateHitbox();
+		backBtn.alpha = 0.7;
+		updateBackButtonPosition();
+		add(backBtn);
+	}
+
+	function updateBackButtonPosition():Void
+	{
+		if (backBtn == null) return;
+		backBtn.x = FlxG.width - backBtn.width - 22;
+		backBtn.y = FlxG.height - backBtn.height - 12;
+	}
+
+	function pointerOverBackButton():Bool
+	{
+		if (backBtn == null || !backBtn.exists || !backBtn.visible || backBtn.alpha <= 0) return false;
+		return (FlxG.mouse != null && FlxG.mouse.overlaps(backBtn, camHUD)) || TouchUtil.overlaps(backBtn);
+	}
+
+	function resetBackButtonVisual():Void
+	{
+		if (backBtn == null) return;
+		backBtn.animation.play('idle', true);
+		backBtn.alpha = 0.7;
+	}
+
+	function updateBackButtonInput():Void
+	{
+		if (backBtn == null || selectedLevel || isTransitioning) return;
+
+		var pointerPressed:Bool = (FlxG.mouse != null && FlxG.mouse.justPressed) || TouchUtil.justPressed;
+		var pointerReleased:Bool = (FlxG.mouse != null && FlxG.mouse.justReleased) || TouchUtil.justReleased;
+		var pointerHeld:Bool = (FlxG.mouse != null && FlxG.mouse.pressed) || TouchUtil.pressed;
+		var pointerInside:Bool = pointerOverBackButton();
+
+		if (pointerPressed)
+		{
+			backButtonPointerActive = true;
+			backButtonPointerOnButton = pointerInside;
+			if (backButtonPointerOnButton)
+			{
+				backBtn.alpha = 1.0;
+				backBtn.animation.play('press', true);
+			}
+		}
+
+		if (backButtonPointerActive && backButtonPointerOnButton && pointerHeld)
+			backBtn.alpha = 1.0;
+
+		if (backButtonPointerActive && pointerReleased)
+		{
+			if (backButtonPointerOnButton && pointerInside)
+				backButtonPendingClose = true;
+			else if (backButtonPointerOnButton)
+				resetBackButtonVisual();
+
+			backButtonPointerActive = false;
+			backButtonPointerOnButton = false;
+		}
+
+		if (!backButtonPendingClose && !backButtonPointerActive && backBtn.animation.curAnim != null && backBtn.animation.curAnim.name == 'press' && backBtn.animation.curAnim.finished)
+			resetBackButtonVisual();
+	}
+
+	function confirmLevel():Void
+	{
+		if (selectedLevel || currentLevel == null || isTransitioning || loadingSong)
+			return;
+
+		if (currentLevel.isUnlocked != null && !currentLevel.isUnlocked())
+		{
+			FunkinSound.playOnce(Paths.sound('cancelMenu'));
+			return;
+		}
+
+		selectedLevel = true;
+		isTransitioning = true;
+		canSelect = false;
+		loadingSong = true;
+		canLerp = false;
+
+		FunkinSound.playOnce(Paths.sound('menu/select_freeplay'));
+		showSelectScreen();
+
+		whiteFlash.alpha = 0;
+		if (FlxG.sound.music != null)
+			FlxG.sound.music.fadeOut(0.15, 0);
+
+		new FlxTimer().start(1.6, function(_)
+		{
+			whiteFlash.alpha = 0;
+			FlxTween.tween(whiteFlash, {alpha: 1}, 1.5, {ease: FlxEase.sineIn});
+		});
+
+		new FlxTimer().start(2.2, function(_)
+		{
+			FlxTween.tween(barTop, {y: 0}, 1.5, {ease: FlxEase.sineOut});
+			FlxTween.tween(barBottom, {y: FlxG.height / 2}, 1.5, {ease: FlxEase.sineOut, onComplete: function(_)
+			{
+				new FlxTimer().start(1.5, function(_)
+				{
+					openChapterSavePoint();
+				});
+			}});
+		});
+	}
+
+	function openChapterSavePoint():Void
+	{
+		FlxG.switchState(() -> new DustinSavePointState(curLevel));
+	}
+
+	function checkLevelOverlap(spr:FlxSprite, isDusttale:Bool):Bool
+	{
+		if (spr == null) return false;
+		if (FlxG.mouse != null && FlxG.mouse.overlaps(spr)) return true;
+		if (TouchUtil.overlaps(spr)) return true;
+
+		var padLeft:Float = isDusttale ? 140 : 60;
+		var padRight:Float = isDusttale ? 675 : 60;
+		var padY:Float = isDusttale ? 140 : 60;
+		var mx:Float = FlxG.mouse != null ? FlxG.mouse.x : 0;
+		var my:Float = FlxG.mouse != null ? FlxG.mouse.y : 0;
+		var sprMinX:Float = spr.x - padLeft;
+		var sprMaxX:Float = spr.x + spr.width + padRight;
+		var sprMinY:Float = spr.y - padY;
+		var sprMaxY:Float = spr.y + spr.height + padY;
+		return (mx >= sprMinX && mx <= sprMaxX && my >= sprMinY && my <= sprMaxY);
+	}
+
+	function handleInput():Void
+	{
+		if (controls.BACK_P)
+		{
+			returnToMenu();
+			return;
+		}
+
+		for (i in 0...levelSprites.length)
+		{
+			if (checkLevelOverlap(levelSprites[i], i == 0))
+			{
+				var isTapped:Bool = (FlxG.mouse != null && FlxG.mouse.justPressed) || TouchUtil.justPressed;
+				if (isTapped)
+				{
+					if (curLevel == i)
+					{
+						confirmLevel();
+					}
+					else
+					{
+						changeLevel(i - curLevel);
+					}
+					return;
+				}
+			}
+		}
+
+		if (controls.UI_LEFT_P || controls.UI_UP_P)
+		{
+			changeLevel(-1);
+			return;
+		}
+
+		if (controls.UI_RIGHT_P || controls.UI_DOWN_P)
+		{
+			changeLevel(1);
+			return;
+		}
+
+		if (controls.ACCEPT_P)
+		{
+			confirmLevel();
+			return;
+		}
+	}
+
+	function changeLevel(change:Int):Void
+	{
+		var oldLevel = curLevel;
+		curLevel = FlxMath.wrap(curLevel + change, 0, levelList.length - 1);
+		if (oldLevel != curLevel || change == 0)
+		{
+			for (i in 0...levelSprites.length)
+			{
+				if (levelSprites[i] != null)
+				{
+					if (i == curLevel)
+						levelSprites[i].animation.play('selected');
+					else
+						levelSprites[i].animation.play('idle');
+
+					levelSprites[i].origin.set(levelSprites[i].frameWidth * 0.5, levelSprites[i].frameHeight);
+				}
+			}
+
+			if (change != 0)
+				FunkinSound.playOnce(Paths.sound('scrollMenu'), 0.4);
+
+			currentLevelId = levelList[curLevel];
+			currentLevel = fetchLevel(currentLevelId);
+
+			var pillarScale:Float = (currentLevelId == 'dusttale') ? 0.98 : 1.0;
+			if (pillars1 != null && pillars1.scale != null)
+				FlxTween.tween(pillars1.scale, {x: pillarScale, y: pillarScale}, 0.3, {ease: FlxEase.quadOut});
+			if (pillars2 != null && pillars2.scale != null)
+				FlxTween.tween(pillars2.scale, {x: pillarScale, y: pillarScale}, 0.3, {ease: FlxEase.quadOut});
+		}
+	}
+
+	function updateShownInfo():Void
+	{
+		if (curLevel >= 0 && curLevel < levelList.length)
+			currentLevelId = levelList[curLevel];
+
+		if (currentLevel == null)
+			currentLevel = fetchLevel(currentLevelId);
+	}
+
+	function showSelectScreen():Void
+	{
+		for (i in 0...levelSprites.length)
+			if (levelSprites[i] != null) levelSprites[i].visible = false;
+		for (i in 0...selectScreens.length)
+			if (selectScreens[i] != null) selectScreens[i].visible = (i == curLevel);
+
+		if (pillars1 != null) pillars1.visible = false;
+		if (pillars2 != null) pillars2.visible = false;
+		if (text != null) text.visible = false;
+	}
+
+	function showMenuScreen():Void
+	{
+		for (i in 0...levelSprites.length)
+			if (levelSprites[i] != null) levelSprites[i].visible = true;
+		for (i in 0...selectScreens.length)
+			if (selectScreens[i] != null) selectScreens[i].visible = false;
+
+		if (pillars1 != null) pillars1.visible = true;
+		if (pillars2 != null) pillars2.visible = true;
+		if (text != null) text.visible = true;
+
+		changeLevel(0);
+		updateShownInfo();
+	}
+
+	function recoverSelection():Void
+	{
+		loadingSong = false;
+		isTransitioning = false;
+		selectedLevel = false;
+		canSelect = true;
+		canLerp = true;
+		barTop.y = -360;
+		barBottom.y = FlxG.height;
+		FlxG.camera.visible = true;
+		FlxG.mouse.visible = true;
+		showMenuScreen();
+	}
+
+	function fetchLevel(id:String):Dynamic
+	{
+		return LevelRegistry.instance.fetchEntry(id);
+	}
+
+	function returnToMenu():Void
+	{
+		if (selectedLevel || isTransitioning || loadingSong) return;
+		selectedLevel = true;
+		isTransitioning = true;
+		canSelect = false;
+		exitingMenu = true;
+		canLerp = false;
+
+		FunkinSound.playOnce(Paths.sound('cancelMenu'));
+		if (FlxG.sound.music != null)
+			FlxG.sound.music.fadeOut(0.75, 0);
+
+		if (levelSprites.length > 0 && levelSprites[0] != null)
+			FlxTween.tween(levelSprites[0].scale, {x: 1.0, y: 1.0}, 0.15, {ease: FlxEase.sineInOut});
+
+		FlxTween.tween(FlxG.camera, {zoom: 1.2}, 0.77, {ease: FlxEase.sineIn});
+		FlxTween.tween(FlxG.camera.scroll, {y: -60}, 0.77, {ease: FlxEase.sineIn});
+		FlxG.camera.fade(FlxColor.BLACK, 0.8, false, function() {
+			FlxTransitionableState.skipNextTransIn = true;
+			FlxG.switchState(() -> new MainMenuState());
+		});
+	}
+
+	function shake(traumatizerr:Float = 0.3, speedizerr:Float = 0.02):Void
+	{
+		tShake = traumatizerr;
+		speedizer = speedizerr;
+		xoffset = FlxG.random.float(-100, 100);
+		yoffset = FlxG.random.float(-100, 100);
+		angleoffset = FlxG.random.float(-100, 100);
+	}
+
+	function updateShake(elapsed:Float):Void
+	{
+		tShake = FlxMath.bound(tShake - (speedizer * elapsed), 0, 1);
+		FlxG.camera.angle += 4 * (tShake * tShake) * FlxSimplex.simplex(tShake * 25.5, tShake * 25.5 + angleoffset, 0);
+	}
+}
